@@ -1,0 +1,47 @@
+heat_template_version: 2014-10-16
+
+parameters:
+  public_network_id: 
+    type: string
+    default: caf8de33-1059-4473-a2c1-2a62d12294fa
+
+  production_port_id:
+    type: string
+  staging_port_id:
+    type: string
+
+  production_stack_name:
+    type: string
+  staging_stack_name:
+    type: string
+
+resources:
+  production_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: { get_param: public_network_id }
+  production_association:
+    type: OS::Neutron::FloatingIPAssociation
+    properties:
+      floatingip_id: { get_resource: production_floating_ip }
+      port_id: { get_param: production_port_id }
+
+  staging_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: { get_param: public_network_id }
+  staging_association:
+    type: OS::Neutron::FloatingIPAssociation
+    properties:
+      floatingip_id: { get_resource: staging_floating_ip }
+      port_id: { get_param: staging_port_id }
+
+outputs:
+  production:
+    value:
+      stack_name: { get_param: production_stack_name }
+      floating_ip: { get_attr: [production_floating_ip, floating_ip_address] }
+  staging:
+    value:
+      stack_name: { get_param: staging_stack_name }
+      floating_ip: { get_attr: [staging_floating_ip, floating_ip_address] }

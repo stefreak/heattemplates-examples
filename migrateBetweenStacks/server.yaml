@@ -1,0 +1,172 @@
+heat_template_version: 2014-10-16
+#
+# you can deploy this template using the following command:
+# 
+#     openstack stack create -t server.yaml --parameter color=<html-color> <stackName>
+# 
+
+description: Deploy an http server serving colors on port 80.
+
+parameters:
+ public_network_id:
+  type: string
+  default: caf8de33-1059-4473-a2c1-2a62d12294fa 
+ color:
+  type: string
+
+resources:
+  allow_webtraffic:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: allow incoming web traffic via http from anywhere. 
+      name: allow incoming traffic, tcp port 80 and 443
+      rules: 
+        - { direction: ingress, remote_ip_prefix: 0.0.0.0/0, port_range_min: 80, port_range_max: 80, protocol: tcp } 
+        - { direction: ingress, remote_ip_prefix: 0.0.0.0/0, port_range_min: 443, port_range_max: 443, protocol: tcp } 
+        - { direction: ingress, remote_ip_prefix: 0.0.0.0/0, port_range_min: 22, port_range_max: 22, protocol: tcp } 
+        - direction: ingress
+          protocol: icmp
+
+  host:
+    type: OS::Nova::Server
+    properties:
+      name: lampserver 
+      key_name: default # TODO remove
+      user_data_format: RAW
+      user_data: { get_resource: cloud-init-config }
+      image: Ubuntu Server 16.04 LTS
+      flavor: m1.micro
+      networks:
+        - port: { get_resource: port_stage }
+        - port: { get_resource: port_prod }
+
+  cloud-init-config:
+   # cloud init resource
+   type: OS::Heat::CloudConfig
+   properties:
+     cloud_config:
+       manage_etc_hosts: true
+       # nova_metadata_ip: 169.254.169.254
+       # nova_metadata_port: 80
+       write_files:
+         -  content: |
+              #!/usr/bin/env bash
+
+              color=$1
+
+              echo "My color is ${color}"
+
+              cat <<EOF> /var/www/html/index.html
+              <!doctype HTML><head><title>${color}</title></head>
+              <body style="background-color:${color}"><h1 style="color:white;">${color}</h1></body>
+              EOF
+
+              create_motd(){
+              echo ''
+              echo ''
+              echo '  Welcome to SysEleven Stack'
+              echo ''
+              echo '            /\'
+              echo '          /\\//\'
+              echo '        /\\//\\//\'
+              echo '        \//\\//\\/'
+              echo '        /\\//\\/'
+              echo '        \//\\/'
+              echo '          \/'
+              echo '     engage.build.run'
+              echo ''
+              echo ''
+              echo 'For documentation please visit'
+              echo 'https://doc.syselevenstack.com/'
+              echo ''
+              echo ''
+              }
+
+              create_motd > /etc/motd
+
+              # wait for valid network
+              until ping -c 1 syseleven.de > /dev/null; do sleep 2; done
+
+              dhclient ens4
+
+              echo "finished setup!"
+            path: /root/provision
+            permissions: 0700
+       runcmd:
+         - [ /root/provision, { get_param: color }]
+       packages:
+         - nginx
+
+
+  # TODO: why 2 ports
+  port_prod:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_resource: net0 }
+      security_groups: [ get_resource: allow_webtraffic ]
+  port_stage:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_resource: net1 }
+      security_groups: [ get_resource: allow_webtraffic ]
+
+  net0:
+    type: OS::Neutron::Net
+    properties: 
+      name: lampserver-net
+  net1:
+    type: OS::Neutron::Net
+    properties: 
+      name: lampserver-net
+      
+
+  subnet0:
+    type: OS::Neutron::Subnet
+    properties:
+      name: lampserver-subnet
+      dns_nameservers:
+        - 37.123.105.116
+        - 37.123.105.117
+      network_id: { get_resource: net0 }
+      ip_version: 4
+      cidr: 10.0.0.0/24
+      allocation_pools:
+      - { start: 10.0.0.10, end: 10.0.0.250 }
+
+  subnet1:
+    type: OS::Neutron::Subnet
+    properties:
+      name: lampserver-subnet
+      dns_nameservers:
+        - 37.123.105.116
+        - 37.123.105.117
+      network_id: { get_resource: net1 }
+      ip_version: 4
+      cidr: 10.10.0.0/24
+      allocation_pools:
+      - { start: 10.10.0.10, end: 10.10.0.250 }
+
+  router:
+    type: OS::Neutron::Router
+    properties:
+      external_gateway_info: {"network": { get_param: public_network_id }}
+      name: lampserver-router
+
+  router_subnet_bridge0:
+    type: OS::Neutron::RouterInterface
+    depends_on: subnet0
+    properties:
+      router_id: { get_resource: router }
+      subnet: { get_resource: subnet0 }
+  router_subnet_bridge1:
+    type: OS::Neutron::RouterInterface
+    depends_on: subnet1
+    properties:
+      router_id: { get_resource: router }
+      subnet: { get_resource: subnet1 }
+
+outputs:
+  production_port_id:
+    value: { get_resource: port_prod }
+  staging_port_id:
+    value: { get_resource: port_stage }
